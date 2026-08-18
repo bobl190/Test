@@ -1,0 +1,378 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>HUD Camera Test Rig</title>
+<style>
+  * { box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
+  html, body {
+    margin: 0; padding: 0; height: 100%; overflow: hidden;
+    background: #000; font-family: -apple-system, 'Segoe UI', sans-serif;
+    color: #eee; touch-action: none;
+  }
+
+  #camera {
+    position: fixed; inset: 0;
+    width: 100%; height: 100%;
+    object-fit: cover;
+    z-index: 0;
+  }
+
+  #permissionScreen {
+    position: fixed; inset: 0; z-index: 50;
+    background: #0a0a0a; display: flex; flex-direction: column;
+    align-items: center; justify-content: center; padding: 24px; text-align: center;
+  }
+  #permissionScreen h1 { font-size: 18px; margin-bottom: 8px; }
+  #permissionScreen p { font-size: 13px; color: #999; max-width: 320px; line-height: 1.5; margin-bottom: 20px; }
+  #startBtn {
+    background: #7CFC7A; color: #0a0a0a; border: none; padding: 14px 28px;
+    border-radius: 12px; font-size: 15px; font-weight: 600;
+  }
+  #permError { color: #ff8080; font-size: 12px; margin-top: 14px; max-width: 300px; }
+
+  /* ---- HUD overlay layer ---- */
+  #hudLayer { position: fixed; inset: 0; z-index: 5; pointer-events: none; }
+
+  .status-row {
+    position: absolute; top: max(16px, env(safe-area-inset-top)); left: 16px; right: 16px;
+    display: flex; justify-content: space-between; font-size: 12px; color: #fff;
+    text-shadow: 0 1px 4px rgba(0,0,0,0.7);
+  }
+  .conn { display:flex; align-items:center; gap:6px; color:#7CFC7A; }
+  .dot-status { width:6px; height:6px; border-radius:50%; background:#7CFC7A; box-shadow:0 0 4px #7CFC7A; }
+
+  .card {
+    position: absolute; top: 50%; left: 50%; transform: translate(-50%, -50%);
+    width: 78%; max-width: 340px;
+    background: rgba(10,12,14,0.88); border-radius: 20px; padding: 20px 18px;
+    text-align: center; box-shadow: 0 0 0 2px transparent, 0 10px 30px rgba(0,0,0,0.5);
+    transition: box-shadow 0.15s ease, background 0.15s ease;
+    pointer-events: auto;
+  }
+  .card.hovered { box-shadow: 0 0 0 2px rgba(124,252,122,0.75), 0 0 20px rgba(124,252,122,0.4); background: rgba(20,30,22,0.92); }
+  .card .sender { font-size: 11px; color:#7CFC7A; margin-bottom: 5px; }
+  .card .body-text { font-size: 14px; color:#fff; margin-bottom: 14px; line-height:1.4; }
+  .card .icon { width: 42px; height: 42px; border-radius: 12px; display:flex; align-items:center; justify-content:center; font-size: 20px; margin: 0 auto 10px; background:#2d5a3d; color:#7CFC7A; }
+  .card .name { font-size: 14px; color: #fff; margin-bottom: 4px; }
+  .card .hint { font-size: 10px; color: #888; }
+  .reply-btn { background: rgba(124,252,122,0.15); border: 1px solid rgba(124,252,122,0.5); color: #7CFC7A; padding: 8px 18px; border-radius: 10px; font-size: 12px; pointer-events: auto; }
+
+  .nav-card {
+    position: absolute; top: max(60px, calc(env(safe-area-inset-top) + 44px)); left: 50%; transform: translateX(-50%);
+    background: rgba(10,12,14,0.88); border-radius: 16px; padding: 14px 22px; text-align: center; min-width: 60%;
+    box-shadow: 0 8px 24px rgba(0,0,0,0.4); pointer-events: auto;
+  }
+  .nav-arrow { font-size: 28px; color: #7CFC7A; line-height: 1; margin-bottom: 4px; }
+  .nav-distance { font-size: 18px; font-weight: 700; color: #fff; }
+  .nav-street { font-size: 11px; color: #aaa; margin-top: 2px; }
+
+  .cursor {
+    position: fixed; width: 20px; height: 20px; border-radius: 50%;
+    border: 2px solid #7CFC7A; background: rgba(124,252,122,0.15);
+    pointer-events: none; transform: translate(-50%, -50%);
+    transition: width 0.1s, height 0.1s, background 0.1s; z-index: 10;
+    display: none;
+  }
+  .cursor.pinching { width: 12px; height: 12px; background: rgba(124,252,122,0.6); }
+
+  /* ---- Bottom control bar (this stands in for hand gestures) ---- */
+  #controlBar {
+    position: fixed; bottom: max(16px, env(safe-area-inset-bottom)); left: 16px; right: 16px;
+    z-index: 20; display: flex; gap: 8px; justify-content: center; flex-wrap: wrap;
+    pointer-events: auto;
+  }
+  .ctrl-btn {
+    background: rgba(20,20,20,0.85); border: 1px solid rgba(255,255,255,0.15);
+    color: #7CFC7A; padding: 10px 14px; border-radius: 12px; font-size: 12px;
+    backdrop-filter: blur(6px);
+  }
+  .ctrl-btn:active { background: rgba(124,252,122,0.2); }
+
+  #toggleControls {
+    position: fixed; top: max(16px, env(safe-area-inset-top)); right: 16px; z-index: 25;
+    background: rgba(20,20,20,0.75); border: 1px solid rgba(255,255,255,0.15);
+    color: #999; padding: 6px 10px; border-radius: 10px; font-size: 11px;
+  }
+</style>
+
+<script src="https://cdn.jsdelivr.net/npm/@mediapipe/camera_utils/camera_utils.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/@mediapipe/control_utils/control_utils.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/@mediapipe/drawing_utils/drawing_utils.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/@mediapipe/hands/hands.js"></script>
+
+<style>
+  #handStatus {
+    position: fixed;
+    top: max(42px, calc(env(safe-area-inset-top) + 26px));
+    left: 16px;
+    z-index: 25;
+    font-size: 10px;
+    color: #aaa;
+    text-shadow: 0 1px 4px #000;
+    pointer-events: none;
+  }
+</style>
+</head>
+<body>
+
+<div id="permissionScreen">
+  <h1>HUD Camera Test Rig</h1>
+  <p>This uses your phone's camera as a stand-in for see-through glasses, with the HUD overlaid on top — so you can walk around and get a feel for the real thing before hardware exists.</p>
+  <button id="startBtn">Start Camera</button>
+  <div id="permError"></div>
+</div>
+
+<video id="camera" autoplay playsinline muted></video>
+
+<div id="handStatus">Hand tracking: waiting…</div>
+
+<div id="hudLayer">
+  <div class="status-row">
+    <div class="conn"><div class="dot-status"></div>Connected</div>
+    <div id="time">09:41</div>
+  </div>
+
+  <div class="card" id="notifCard" style="display:none;">
+    <div class="sender">Messages · Alex</div>
+    <div class="body-text">On my way, 5 min</div>
+    <button class="reply-btn" id="replyBtn">Reply</button>
+  </div>
+
+  <div class="card" id="homeCard" style="display:none;">
+    <div class="icon">☰</div>
+    <div class="name">Home</div>
+    <div class="hint">pinch / tap to open</div>
+  </div>
+
+  <div class="nav-card" id="navCard" style="display:none;">
+    <div class="nav-arrow">↰</div>
+    <div class="nav-distance">150 ft</div>
+    <div class="nav-street">Turn left on 5th Ave</div>
+  </div>
+</div>
+
+<div class="cursor" id="cursor"></div>
+
+<button id="toggleControls">Hide controls</button>
+
+<div id="controlBar">
+  <button class="ctrl-btn" onclick="showScreen('home')">Home card</button>
+  <button class="ctrl-btn" onclick="showScreen('notif')">Notification</button>
+  <button class="ctrl-btn" onclick="showScreen('nav')">Navigation</button>
+  <button class="ctrl-btn" onclick="showScreen('none')">Clear</button>
+</div>
+
+
+<script>
+  const video = document.getElementById('camera');
+  const permScreen = document.getElementById('permissionScreen');
+  const startBtn = document.getElementById('startBtn');
+  const permError = document.getElementById('permError');
+  const cursor = document.getElementById('cursor');
+  const controlBar = document.getElementById('controlBar');
+  const toggleControlsBtn = document.getElementById('toggleControls');
+  const handStatus = document.getElementById('handStatus');
+
+  const cards = {
+    home: document.getElementById('homeCard'),
+    notif: document.getElementById('notifCard'),
+    nav: document.getElementById('navCard'),
+  };
+
+  function showScreen(which) {
+    Object.values(cards).forEach(c => {
+      c.style.display = 'none';
+      c.classList.remove('hovered');
+    });
+    if (which !== 'none' && cards[which]) cards[which].style.display = 'block';
+  }
+
+  function moveCursor(x, y) {
+    cursor.style.left = x + 'px';
+    cursor.style.top = y + 'px';
+    cursor.style.display = 'block';
+    checkHover(x, y);
+  }
+
+  function checkHover(x, y) {
+    const visibleCard = Object.values(cards).find(c => c.style.display !== 'none');
+    if (!visibleCard) return false;
+    const r = visibleCard.getBoundingClientRect();
+    const within = x >= r.left && x <= r.right && y >= r.top && y <= r.bottom;
+    visibleCard.classList.toggle('hovered', within);
+    return within;
+  }
+
+  function activateAt(x, y) {
+    const visibleCard = Object.values(cards).find(c => c.style.display !== 'none');
+    if (!visibleCard) return;
+
+    const r = visibleCard.getBoundingClientRect();
+    if (x < r.left || x > r.right || y < r.top || y > r.bottom) return;
+
+    if (visibleCard === cards.home) {
+      showScreen('notif');
+    } else if (visibleCard === cards.notif) {
+      document.getElementById('replyBtn').click();
+    }
+  }
+
+  startBtn.addEventListener('click', async () => {
+    try {
+      const stream = await navigator.mediaDevices.getUserMedia({
+        video: {
+          facingMode: { ideal: 'environment' },
+          width: { ideal: 1280 },
+          height: { ideal: 720 }
+        },
+        audio: false
+      });
+
+      video.srcObject = stream;
+      await video.play();
+
+      permScreen.style.display = 'none';
+      showScreen('home');
+      handStatus.textContent = 'Hand tracking: starting…';
+      startHandTracking();
+    } catch (err) {
+      permError.textContent =
+        'Camera access failed: ' + err.message +
+        '. Make sure you allow camera permission and use HTTPS.';
+    }
+  });
+
+  // Touch fallback
+  document.addEventListener('touchstart', (e) => {
+    if (e.target.closest('#controlBar') || e.target.closest('#toggleControls')) return;
+    const t = e.touches[0];
+    moveCursor(t.clientX, t.clientY);
+    cursor.classList.add('pinching');
+  }, { passive: true });
+
+  document.addEventListener('touchmove', (e) => {
+    if (e.target.closest('#controlBar') || e.target.closest('#toggleControls')) return;
+    const t = e.touches[0];
+    moveCursor(t.clientX, t.clientY);
+  }, { passive: true });
+
+  document.addEventListener('touchend', () => {
+    cursor.classList.remove('pinching');
+  }, { passive: true });
+
+  // Desktop mouse fallback
+  document.addEventListener('mousemove', e => moveCursor(e.clientX, e.clientY));
+  document.addEventListener('mousedown', () => cursor.classList.add('pinching'));
+  document.addEventListener('mouseup', () => cursor.classList.remove('pinching'));
+
+  document.getElementById('replyBtn').addEventListener('click', (e) => {
+    e.stopPropagation();
+    alert('Reply flow: opens keyboard/voice input → NotificationBridge.SendReply() → phone → real text via NotificationForwarder.kt');
+  });
+
+  let controlsVisible = true;
+  toggleControlsBtn.addEventListener('click', () => {
+    controlsVisible = !controlsVisible;
+    controlBar.style.display = controlsVisible ? 'flex' : 'none';
+    toggleControlsBtn.textContent = controlsVisible ? 'Hide controls' : 'Show controls';
+  });
+
+  function tick() {
+    const now = new Date();
+    const hh = String(now.getHours()).padStart(2,'0');
+    const mm = String(now.getMinutes()).padStart(2,'0');
+    document.getElementById('time').textContent = `${hh}:${mm}`;
+  }
+  tick();
+  setInterval(tick, 1000);
+
+  // -----------------------------
+  // REAL HAND TRACKING
+  // Index fingertip = cursor.
+  // Thumb + index fingertip pinch = select/click.
+  // -----------------------------
+  let hands;
+  let mpCamera;
+  let lastPinch = false;
+  let lastClickTime = 0;
+
+  function distance(a, b) {
+    return Math.hypot(a.x - b.x, a.y - b.y);
+  }
+
+  function startHandTracking() {
+    if (typeof Hands === 'undefined' || typeof Camera === 'undefined') {
+      handStatus.textContent = 'Hand tracking: library failed to load';
+      return;
+    }
+
+    hands = new Hands({
+      locateFile: (file) =>
+        `https://cdn.jsdelivr.net/npm/@mediapipe/hands/${file}`
+    });
+
+    hands.setOptions({
+      maxNumHands: 1,
+      modelComplexity: 1,
+      minDetectionConfidence: 0.6,
+      minTrackingConfidence: 0.6
+    });
+
+    hands.onResults(onHandResults);
+
+    mpCamera = new Camera(video, {
+      onFrame: async () => {
+        await hands.send({ image: video });
+      },
+      width: 1280,
+      height: 720
+    });
+
+    mpCamera.start();
+  }
+
+  function onHandResults(results) {
+    if (!results.multiHandLandmarks || !results.multiHandLandmarks.length) {
+      handStatus.textContent = 'Hand tracking: show your hand';
+      cursor.style.display = 'none';
+      return;
+    }
+
+    const lm = results.multiHandLandmarks[0];
+
+    // MediaPipe coordinates are normalized 0–1.
+    // Mirror horizontally so the cursor behaves naturally like a selfie-style pointer.
+    const index = lm[8];
+    const thumb = lm[4];
+
+    const x = (1 - index.x) * window.innerWidth;
+    const y = index.y * window.innerHeight;
+
+    moveCursor(x, y);
+
+    const pinchDistance = distance(index, thumb);
+    const isPinching = pinchDistance < 0.065;
+
+    cursor.classList.toggle('pinching', isPinching);
+    handStatus.textContent = isPinching
+      ? 'Hand tracking: PINCH'
+      : 'Hand tracking: tracking';
+
+    // Rising edge of pinch = one click.
+    if (isPinching && !lastPinch) {
+      const now = Date.now();
+      if (now - lastClickTime > 500) {
+        lastClickTime = now;
+        activateAt(x, y);
+      }
+    }
+
+    lastPinch = isPinching;
+  }
+</script>
+
+
+</body>
+</html>
